@@ -1,0 +1,199 @@
+---
+title: "Вычисление интегралов методом Монте-Карло"
+output: html_document
+---
+
+## Вариант 1
+$$J = \int_0^1 f(x)dx = \int_0^1 \sin\left(\frac{1}{\sqrt{x}} + e^{-x}\right)dx$$
+
+* Убедиться, что интеграл сходится
+* Реализовать процедуру интегрирования методом Монте-Карло для произвольной интегрирующей плотности. Убедиться в том, что процедура дает правильный результат
+* Для случая конечных пределов проверить порядок сходимости процедуры Монте-Карло для
+равномерной интегрирующей плотности
+* Подобрать несколько интегрирующих плотностей и выбрать из них оптимальную с точки зрения скорости сходимости и дисперсии оценки. Обосновать выбор
+
+## Сходимость
+
+$$|\sin(t)| \leq 1$$
+Интеграл (абсолютно) сходится, потому что абсолютное значение $\sin$ ограничено $1$, и мы интегрируем по ограниченному интервалу $[0,1]$.
+
+Шаг 1. $$\xi_1 \dots \xi_n \text{ —  н.о.р. }P_\xi$$
+Шаг 2. $$\eta_i = \frac{f}{p}(\xi_i)$$
+Шаг 3. $$\hat{J}_n = \frac{1}{n} (\eta_1 \dots \eta_n) \to J$$
+Доверительный интервал:
+$$J \in\left(\hat{J}_{n}-\frac{\sigma}{\sqrt{n}} x_{\gamma} ; \hat{J}_{n}+\frac{\sigma}{\sqrt{n}} x_{\gamma}\right)$$
+
+$$P(|\hat{J}_n - J| > \epsilon) \leq \frac{\sigma^2}{n\epsilon^2}$$
+
+## Для произвольной плотности:
+### Рассмотрим равномерное распределение:
+
+```{r}
+# install.packages("ggplot2")
+library(ggplot2)
+n <- 10000
+options(warn=-1)
+
+
+f <- function(x) {sin(1/sqrt(x) + exp(-x))}
+p <- function(x) {dunif(x)}
+
+m <- function(x) {f(x)/p(x)}
+dens <- function(n) {runif(n)}
+
+J <- integrate(f, lower = 0, upper = 1)$value
+
+simulate_eta <- function(n, den){
+  xi <- den(n)
+  e.mean <- cumsum(m(xi))/seq_along(m(xi))
+  # e.var <- cumsum(m(xi)^2) / (1:n) - e.mean^2
+  e.var <- (cumsum(m(xi)^2) / (1:n) - e.mean^2) * (n / (n - 1))
+
+  return(list(mean = e.mean, var = e.var))
+}
+
+conf_int <- function(mean, sd, gamma = 0.05)
+{
+  p <- qnorm(1 - gamma/2)
+
+  return(list(left = mean - p*sd/sqrt(1:n), 
+    right = mean + p*sd/sqrt(1:n)))
+}
+
+cheb_int <- function(mean, sd, gamma = 0.05)
+{
+
+  eps <- sd/sqrt(gamma*n)
+
+  return(list(left = mean - eps, 
+    right = mean + eps))
+}
+
+monte_carlo <- function(N, den){
+  eta <- simulate_eta(N, den)
+  conf <- conf_int(eta$mean, sqrt(eta$var))
+  cheb <- cheb_int(eta$mean, sqrt(eta$var))
+
+  res <- data.frame(Jn = eta$mean, J, conf.left = conf$left, conf.right = conf$right, cheb.left = cheb$left, cheb.right = cheb$right)
+}
+
+conf_plot <- function(dat, v1,v2,v3)
+{
+  ggplot(data = dat, aes(y = Jn, x = 1:n, colour = "red")) + 
+    geom_line() + 
+    geom_line(aes(y = J), col = "black") +
+    geom_line(aes(y = conf.left, colour = "blue")) + geom_line(aes(y = conf.right, colour = "blue")) +
+    geom_line(aes(y = cheb.left, colour = "green")) + geom_line(aes(y = cheb.right, colour = "green")) +
+    ylab("Integral estimate") + xlab("n") +
+    scale_colour_manual("Plots", values = c("blue", "green", "red"), labels = c("CLT", "Chebyshev", "Monte-Carlo")) +
+    xlim(0, n) + ylim(J - 1000/n, J + 1000/n)
+}
+
+
+mc <- monte_carlo(n, dens)
+# tmp <- scale_colour_manual("Plots", values = c("blue", "green", "red"), labels = c("CLT", "Chebyshev", "Monte-Carlo"))
+# print(tmp$)
+# names(tmp$aesthetics) <- c("a", "b", "c")
+conf_plot(mc) + ggtitle("Uniform")
+```
+
+### Рассмотрим бета-распределение с параметрами $\frac{1}{2}, \frac{1}{2}$:
+
+```{r}
+p <- function(x) {dunif(x)}
+dens <- function(n) {runif(n)}
+est <- simulate_eta(n, dens) 
+
+p <- function(x) {dbeta(x, 1/2,1/2)}
+dens <- function(n) {rbeta(n,1/2,1/2)} 
+est1 <- simulate_eta(n, dens)
+mc1 <- monte_carlo(n, dens)
+
+conf_plot(mc1) + ggtitle("beta(0.5, 0.5)")
+```
+
+## Найдём наилучшие параметры для бета-распределения перебором:
+
+```{r}
+i <- 0.01
+j <- 0.01
+
+df <- data.frame (i  = double(), j = double(), var = double(), mean = double())
+
+
+i <- 0.01
+while (i < 1.5) 
+{
+  
+  j <- 0.01
+  while(j < 1.5) 
+  {
+    # print(i, j)
+    p <<- function(x) {dbeta(x, i, j)}
+    dens <<- function(n) {rbeta(n, i, j)} 
+    estt <- simulate_eta(n, dens)
+    # print(estt$var[n])
+    df[nrow(df) + 1,] = c(i, j, estt$var[n], estt$mean[n])
+    j <<- j + 0.1  # 0.01
+  }
+  i <<- i + 0.1  # 0.01
+  # print(df)
+}
+print(head(df[order(df$var),]))
+
+# print(head(df[order(abs(df$mean - J)),]))
+```
+
+### Возьмём параметры $\alpha = 1.11, \beta = 0.81$:
+
+```{r}
+alpha = 1.11
+beta = 0.81
+beta_opt = sprintf("beta(%g,%g)", alpha, beta)
+beta_opt
+```
+
+```{r}
+p <- function(x) {dbeta(x, alpha, beta)} 
+dens <- function(n) {rbeta(n, alpha, beta)} 
+est2 <- simulate_eta(n, dens)
+mc2 <- monte_carlo(n, dens)
+
+conf_plot(mc2) + ggtitle(beta_opt)
+```
+
+## Сравним выбранные плотности на графике
+
+```{r}
+# library(reshape2)
+x <- seq(0,1,length=100)
+db <- dbeta(x, 0.5, 0.5)
+du <- dunif(x)
+dbo <- dbeta(x, alpha, beta)
+f <- function(x) {sin(1/sqrt(x) + exp(-x))}
+
+# qplot(x, db, geom="line")
+ggplot() + geom_line(aes(x,du, color = "darkblue")) + 
+  geom_line(aes(x, dbo, color = "purple")) +
+  geom_line(aes(x,db, color = "red")) + 
+  # geom_line(aes(x,f, color = "black")) + 
+  stat_function(fun=f, aes(color = "black"))+
+
+  scale_colour_manual("Distributions", values = c("black", "darkblue", "purple", "red"), 
+    labels = c("f(x)", " Uniform", beta_opt, "beta(0.5, 0.5)")) +
+  ylab("density") + ggtitle("Density plots")
+```
+
+## Сравним дисперсии
+
+```{r}
+vars <- data.frame(v0 = est$var, v1 = est1$var, v2 = est2$var)
+
+ggplot(data = vars, aes(x = 1:n)) + 
+  geom_line(aes(y = v0, colour = "unif")) + 
+  geom_line(aes(y = v1, colour = "beta(0.5,0.5)") ) +
+  geom_line(aes(y = v2, colour = beta_opt)) +
+  scale_color_manual(name = "Distributions", values = c("red", "purple", "darkblue"), labels = c("beta(0.5, 0.5)", beta_opt, "unif")) +
+  xlab("n") + ylab("Variance") + xlim(0,n) + ylim(0.2, 0.5) + ggtitle("Variance")
+```
+

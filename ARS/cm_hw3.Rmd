@@ -1,0 +1,249 @@
+---
+title: "Адаптивный метод отбора"
+author: "Пономаренко Артем, 422"
+output: html_document
+---
+
+### Вариант 14
+
+Реализуйте метод адаптивного отбора с использованием производной логарифма плотности для распределения Бирнбаума-Саундерса с плотностью
+$$
+p(x)=\frac{\sqrt{x}+\sqrt{\frac{1}{x}}}{2 \gamma x} \varphi\left(\frac{\sqrt{x}-\frac{1}{x}}{\gamma}\right), \quad x>0, \gamma>0
+$$
+Здесь $\varphi(x)$ - плотность стандартного нормального распределения.
+
+Алгоритм:
+
+1. Установить набор фиксированных точек и оценить логарифм плотности $(l=log(p))$, и производных логарифма плотности по фиксированным точкам.
+
+2. Используем эти оценки функций для построения кусочно-линейной верхней границы для логарифмической плотности ($l_+$), через поддерживающие касательные линии логарифмической плотности в фиксированных точках.
+
+3. Пусть  $g_+ = exp(log(p))$. Из-за кусочно-линейного построения $p_+$, $g_+$ кусочно-экспоненциальная, выборка $Y \sim g_+$ простая.
+
+4. Возьмём $U∼Unif(0,1)$
+Если $U \leq exp(l(Y) - l_+(Y))$, принимаем $Y$ в противном случае берём другой образец из $g_+$
+
+5. Для любого $Y$ отклоненных по вышеуказанным критериям, $Y$ может быть добавлен к начальному набору фиксированных точек и кусочно-линейной верхней границе $l_+$ адаптивно.
+
+Возьмём $\gamma = 1$:
+
+```{r}
+#install.packages("numDeriv")
+options(warn = -1)
+library(numDeriv)
+library(ggplot2)
+
+gamma = 1
+bounds = c(0.03, 11)
+
+n = 10000
+breaks = 20
+
+p <- function(x) 
+{
+  # (sqrt(x) + sqrt(1/x))/(2 * gamma * x) * dnorm((sqrt(x) - 1/x) / gamma)
+  # dexp(x)
+  dnorm(x, mean = 1)
+}
+
+l <- function(x) { 
+  # log(p(x)) 
+  # logb((sqrt(x) + sqrt(1/x))) - logb(2*gamma*x) + dnorm((sqrt(x) - 1/x) / gamma, log = TRUE)
+  log(p(x))
+}
+
+dl <- function(x) {
+  grad(l, x)
+}
+```
+
+```{r}
+ggplot(data.frame(x=bounds), aes(x)) +
+  stat_function(fun=p, geom="line")+
+  ggtitle("p(x)")
+```
+
+```{r}
+ggplot(data.frame(x=bounds), aes(x))+
+  stat_function(fun=l, geom="line")+
+  ggtitle("log(p(x))")
+  # l(9)
+```
+
+Определим точки пересечения касательных линий как:
+
+$$z_{j} = y_{j} + \frac{l  (y_{j} )-l(y_{j+1})+(y_{j+1}-y_{j}) l^{\prime}(y_{j+1})}{l^{\prime}(y_{j+1})-l^{\prime}(y_{j})}$$
+
+```{r}
+ymin = 0
+ymax = Inf
+
+## вычисление точек пересечения опорных касательных линий
+zfix = function(yfixed)
+{
+    yf0 = head(yfixed, n=-1)
+    yf1 = tail(yfixed, n=-1)
+    zfixed = yf0 + (l(yf0) - l(yf1) + (yf1 - yf0)*dl(yf1)) / (dl(yf1) - dl(yf0))
+    return(zfixed)  
+}
+```
+
+Кусочно-линейная функция:
+$$l_{+}(y)= \begin{cases}l(y_{1})+(y-y_{1}) l^{\prime}(y_{1}) & y \leq z_{1} \\ l(y_{j})+(y_{j+1}-y_{j}) l^{\prime}(y_{j+1}) & z_{j} \leq y \leq z_{j+1} \\ l(y_{k})+(y-y_{k}) l^{\prime}(y_{k}) & z_{k} \leq y\end{cases}$$
+
+```{r}
+## оценка ненормированной кусочно-линейной верхней границы логарифма плотности
+l_plus = function(y, yfixed) 
+{
+    res = rep(0, length(y))
+    zfixed = zfix(yfixed)
+
+    piecewise.idx = findInterval(y, c(ymin, zfixed, ymax))
+    npieces = length(zfixed) + 1
+
+    for(pidx in 1:npieces){
+        yp = y[piecewise.idx == pidx]
+        xx = l(yfixed[pidx]) + (yp - yfixed[pidx])*grad(l, yfixed[pidx]) 
+        res[piecewise.idx == pidx] = xx
+    }
+    return(res)
+}
+```
+
+Построим график логарифма плотности:
+
+```{r}
+yfixed <- seq(bounds[1], bounds[2], length.out=breaks)
+
+z_grid <- zfix(yfixed)
+
+l_plus_plot <- function(x){l_plus(x, yfixed)}
+
+
+ggplot(data.frame(x=yfixed), aes(x))+
+  stat_function(fun=l, geom="line", aes(colour='l(x)'))+
+  stat_function(fun = l_plus_plot, geom = 'line', aes(colour = "l_+(x)")) +
+  geom_point(y = l_plus_plot(yfixed)) +
+  scale_colour_manual("Func", values=c("black","orange"), breaks=c("l(x)","l_+(x)")) #+ xlim(0, 1) #+ xlim(bounds)
+```
+
+Вычислим функцию распределения:
+$$G_+(t) = \int_{-\infty}^t p_+(x) dx = \int_{-\infty}^t exp(l_+(x)) dx $$
+
+Делаем выборку из плотности $g_+$.
+* Возьмём $U∼Unif(0,1)$. 
+ * Если $U \leq exp(l(Y) - l_+(Y))$, принимаем $Y$
+ * в противном случае берём другой образец из $g_+$
+* Для любого $Y$ отклоненных по вышеуказанным критериям, $Y$ может быть добавлен к начальному набору фиксированных точек и кусочно-линейной верхней границе $l_+$.
+
+```{r}
+# wei = integrate(function(x) exp(l_plus_plot(x)), lower=0, upper = Inf)$value
+
+# dens_plus <- function(x) exp(l_plus_plot(x))/wei
+
+# cdf_plus <- function(y) integrate(dens_plus, lower=0, upper = y)$value
+
+
+gplus.cdf = function(vals, yfixed) 
+{
+    # equivalently:  integrate(function(z) exp(hplus(z, yfixed)), lower=-Inf, upper = vals)
+
+    zfixed = zfix(yfixed) # точки пересечения
+
+    zlen = length(zfixed) # кол-во узлов
+    pct = numeric(length(vals))
+    norm.const = 0
+    for(zi in 0:zlen) {
+        if(zi == 0)
+        {
+            zm = 0
+        } else {
+            zm = zfixed[zi]
+        }
+
+        if(zi == zlen)
+        {
+            zp = Inf
+        } else {
+            zp = zfixed[zi+1]
+        }
+
+        yp = yfixed[zi+1]
+        ds = exp(l(yp))/dl(yp) * ( exp((zp - yp)*dl(yp)) - exp((zm - yp)*dl(yp)) )
+
+        cidx = zm < vals & vals <= zp
+        hidx = vals > zp
+
+        pct[cidx] = pct[cidx] + exp(l(yp))/dl(yp) * ( exp((vals[cidx] - yp)*dl(yp)) - exp((zm - yp)*dl(yp)) )
+        pct[hidx] = pct[hidx] + ds
+
+        norm.const = norm.const + ds
+    }
+
+    print(pct)
+    l = list( 
+            pct = pct / norm.const, 
+            norm.const = norm.const
+        )
+    return(l)
+}
+
+# cdf_plus(5)
+# gplus.cdf(5, yfixed)
+```
+
+```{r}
+## sample from the gplus density
+gplus.sample = function(samp.size, yfixed)
+{
+    zfixed = zfix(yfixed)
+    gp = gplus.cdf(zfixed, yfixed)
+    # gp = cdf_plus(yfixed)
+    zpct = gp$pct
+    # print
+    norm.const = gp$norm.const
+    ub = c(0, zpct, 1)
+
+    unif.samp = runif(samp.size)
+
+    print(ub)
+    fidx = findInterval(unif.samp, ub)
+    num.intervals = length(ub) - 1
+    zlow = c(ymin, zfixed)
+    res = rep(NaN, length(unif.samp))
+    for(ii in 1:num.intervals)
+    {
+        ui = unif.samp[ fidx == ii ]
+
+        if(length(ui) == 0)
+        {
+            next
+        }
+
+        ## Invert the gplus CDF
+        yp = yfixed[ii]
+        zm = zlow[ii]
+        tmp = (ui - ub[ii]) * dl(yp) * norm.const / exp(l(yp)) + exp( (zm - yp)*dl(yp) )
+        tmp = yp + log(tmp) / dl(yp)
+        res[ fidx == ii ] = tmp
+    }
+    return(res)
+}
+```
+
+```{r}
+smpl = gplus.sample(n, yfixed)
+
+# set.seed(1234)
+df <- data.frame(sample=smpl)
+# head(df)
+```
+
+```{r}
+ggplot(df, aes(x=sample)) +
+geom_histogram(aes(y=..density..), position="identity", alpha=0.5, binwidth = 0.5, fill="lightblue")+
+geom_density(aes(colour = "p+(x)")) +
+stat_function(fun=p, geom="line", aes(colour = "p(x)")) +
+scale_colour_manual("Func", values=c("darkblue","red"), breaks=c("p+(x)","p(x)")) + #+ #+ xlim(0, 0.3) #+ xlim(bounds) 
+labs(title="Sample histogram plot", x="Sample", y = "Density") + xlim(bounds) #+ ylim(0,1)
+```

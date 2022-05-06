@@ -1,0 +1,57 @@
+---
+title: "EM алгоритм"
+output: html_notebook
+---
+
+## Пономаренко Артем, вариант 2
+### Задание
+Используя пакет mclust произвести процедуру оценивания, обосновать адекватность полученной
+модели, визуализировать полученные компоненты.
+
+Имеем множество наблюдений $x_1, \dots x_n$ --- случайные реализации из распределений $E_1, \dots, E_k$
+$f_j(x_i, \theta)$ --- плотность $x_i \sim E_j$
+Введем переменную $\gamma_i = j$, если $x_i \sim E_j$
+Цель оптимизации модели: найти $\theta, \gamma$: $L(\theta, \gamma) = \prod_{i=1}^n f(\gamma_i,x_i \;|\; \theta) \to max$ --- максимизируем функцию правдоподобия
+
+
+Построим диаграмму двумерной плотности распределения данных:
+```{r}
+# install.packages("ggplot2")
+library('mclust')
+library("ggplot2")
+
+df <- read.csv("~/Coding/R_projects/2dn.txt", sep = ' ')
+# plot(df)
+ggplot(df, aes(x = V1, y = V2)) +
+  geom_point() + stat_density2d_filled(alpha=0.5) + ylim(-4.5,4.5)
+
+```
+
+
+### Байесовский информационный критерий
+$$BIC = k\ln(n) - 2ln(\hat{L})$$
+
+$\hat{L}$--- максимум функции правдоподобия по $\hat{\theta}$
+<!-- $$\hat{L} = p(x|\hat{\theta}, M)$$  -->
+
+<!-- Volume + Shape + Orientation -->
+<!-- Объем форма ориентация -->
+
+Зависимость критерия BIC от числа кластеров
+```{r}
+BIC <- mclustBIC(df, verbose = FALSE)
+print(BIC)
+plot(BIC)
+```
+Мы получили разбиение исходных наблюдений на 6 кластеров с
+оптимальным BIC = -3918.974.
+
+```{r}
+mc <- Mclust(df, verbose = FALSE)# modelNames = "EEE")
+summary(mc, parameters = TRUE)
+plot(mc, what = "classification")
+plot(mc, what = "uncertainty")
+
+```
+
+
